@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>提交任务 - 分布式解压系统</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <header>
+        <h1><span>分布式</span>解压系统</h1>
+        <nav id="main-nav"></nav>
+    </header>
+
+    <div class="container">
+        <div class="card">
+            <div class="card-title">提交解压任务</div>
+            <div class="form-group">
+                <label>输入文件夹路径（UNC 路径，递归扫描所有子文件夹中的压缩包）</label>
+                <div style="font-size:0.75rem;color:var(--gray);margin-bottom:0.25rem">
+                    格式：\\服务器\共享文件夹\路径 ，支持 .zip / .tar.gz / .tgz / .tar / .gz
+                </div>
+                <textarea id="input-paths" rows="4" placeholder="示例：&#10;\\192.168.1.10\home\Drive\WorkSpace\06LAB\ray_unzip\data\tar_gz"></textarea>
+            </div>
+            <div class="form-group">
+                <label>输出根文件夹（可选）</label>
+                <div style="font-size:0.75rem;color:var(--gray);margin-bottom:0.25rem">
+                    不填则使用默认输出路径，格式与输入路径相同
+                </div>
+                <input type="text" id="output-root" placeholder="\\192.168.1.10\home\Drive\WorkSpace\06LAB\ray_unzip\data\unTar">
+            </div>
+            <button class="btn btn-primary" onclick="submitTasks()">提交</button>
+            <div id="submit-result" style="margin-top:1rem"></div>
+        </div>
+    </div>
+
+    <div class="toast-container" id="toast-container"></div>
+    <script src="/static/js/auth.js"></script>
+    <script>
+        if (!checkAuth()) {};
+        renderNav('/submit');
+
+        async function submitTasks() {
+            const textarea = document.getElementById('input-paths');
+            const outputRoot = document.getElementById('output-root').value.trim();
+            const lines = textarea.value.split('\n').map(l => l.trim()).filter(l => l);
+            const resultDiv = document.getElementById('submit-result');
+
+            if (lines.length === 0) {
+                showToast('请输入至少一个文件夹路径', 'error');
+                return;
+            }
+
+            try {
+                const result = await apiPost('/api/tasks/submit', {
+                    input_paths: lines,
+                    output_root: outputRoot || null
+                });
+                resultDiv.innerHTML = `<div style="color:var(--success)">已提交 ${result.length} 个批次。<a href="/tasks">查看任务</a></div>`;
+                showToast(`已提交 ${result.length} 个批次`, 'success');
+                textarea.value = '';
+            } catch (e) {
+                showToast('提交失败: ' + e.message, 'error');
+            }
+        }
+    </script>
+</body>
+</html>

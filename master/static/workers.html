@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>工作节点 - 分布式解压系统</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <style>
+        .worker-row { cursor: pointer; }
+        .worker-row:hover { background: var(--bg); }
+    </style>
+</head>
+<body>
+    <header>
+        <h1><span>分布式</span>解压系统</h1>
+        <nav id="main-nav"></nav>
+    </header>
+
+    <div class="container">
+        <div class="kpi-grid">
+            <div class="kpi-card total">
+                <div class="kpi-label">工作节点总数</div>
+                <div class="kpi-value" id="kpi-total">0</div>
+            </div>
+            <div class="kpi-card success">
+                <div class="kpi-label">活跃</div>
+                <div class="kpi-value" id="kpi-active">0</div>
+            </div>
+            <div class="kpi-card running">
+                <div class="kpi-label">忙碌</div>
+                <div class="kpi-value" id="kpi-busy">0</div>
+            </div>
+            <div class="kpi-card failed">
+                <div class="kpi-label">离线</div>
+                <div class="kpi-value" id="kpi-offline">0</div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-title">工作节点</div>
+            <div class="toolbar">
+                <button class="btn btn-secondary btn-sm" onclick="loadWorkers()">刷新</button>
+            </div>
+            <div style="overflow-x:auto">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>主机名</th>
+                            <th>IP</th>
+                            <th>状态</th>
+                            <th>并发数</th>
+                            <th>已完成</th>
+                            <th>最后心跳</th>
+                            <th>操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="worker-table-body">
+                        <tr><td colspan="8" style="text-align:center;color:var(--gray)">加载中...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <div class="toast-container" id="toast-container"></div>
+    <script src="/static/js/auth.js"></script>
+    <script>
+        if (!checkAuth()) {};
+        renderNav('/workers');
+
+        function getStatusBadge(status) {
+            const map = {
+                'active': ['活跃', 'status-success'],
+                'paused': ['已暂停', 'status-warning'],
+                'restarting': ['重启中', 'status-running'],
+                'offline': ['离线', 'status-failed']
+            };
+            const [label, cls] = map[status] || [status, ''];
+            return `<span class="status-badge ${cls}">${label}</span>`;
+        }
+
+        function formatTime(dt) {
+            if (!dt) return '-';
+            return new Date(dt.replace(' ', 'T') + 'Z').toLocaleString('zh-CN', {timeZone: 'Asia/Shanghai'});
+        }
+
+        async function loadWorkers() {
+            try {
+                const data = await apiGet('/api/workers/list');
+                const tbody = document.getElementById('worker-table-body');
+
+                const total = data.workers.length;
+                const active = data.workers.filter(w => w.status === 'active').length;
+                const busy = data.workers.filter(w => w.status === 'active' && w.active_task_id).length;
+                const offline = data.workers.filter(w => w.status !== 'active' && w.status !== 'paused').length;
+
+                document.getElementById('kpi-total').textContent = total;
+                document.getElementById('kpi-active').textContent = active;
+                document.getElementById('kpi-busy').textContent = busy;
+                document.getElementById('kpi-offline').textContent = offline;
+
+                if (data.workers.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--gray)">暂无工作节点</td></tr>';
+                    return;
+                }
+
+                tbody.innerHTML = data.workers.map(w => {
+                    const hb = formatTime(w.last_heartbeat);
+                    const maxCon = w.max_concurrent_tasks || 1;
+                    const hasTask = w.active_task_id ? 1 : 0;
+                    const concurrency = `${hasTask}/${maxCon}`;
+                    let actions = '';
+                    if (w.status === 'active') {
+                        actions += `<button class="btn btn-sm btn-warning" onclick="event.stopPropagation();pauseWorker('${w.id}')">暂停</button>`;
+                    }
+                    if (w.status === 'paused') {
+                        actions += `<button class="btn btn-sm btn-success" onclick="event.stopPropagation();resumeWorker('${w.id}')">恢复</button>`;
+                    }
+                    if (w.status === 'offline') {
+                        actions += `<button class="btn btn-sm btn-danger" onclick="event.stopPropagation();deleteWorker('${w.id}')">删除</button>`;
+                    }
+                    actions += `<a href="/worker?id=${w.id}" class="btn btn-sm btn-secondary" onclick="event.stopPropagation()">详情</a>`;
+                    return `
+                        <tr class="worker-row" onclick="window.location.href='/worker?id=${w.id}'">
+                            <td title="${w.id}">${w.id.substring(0, 8)}...</td>
+                            <td>${w.hostname}</td>
+                            <td>${w.ip_address}</td>
+                            <td>${getStatusBadge(w.status)}</td>
+                            <td>${concurrency}</td>
+                            <td>${w.total_tasks}</td>
+                            <td>${hb}</td>
+                            <td style="white-space:nowrap">${actions}</td>
+                        </tr>
+                    `;
+                }).join('');
+            } catch (e) {
+                document.getElementById('worker-table-body').innerHTML = `<tr><td colspan="8" style="text-align:center;color:var(--danger)">加载失败</td></tr>`;
+            }
+        }
+
+        async function pauseWorker(workerId) {
+            try {
+                await apiPost(`/api/workers/${workerId}/pause`, {});
+                showToast('工作节点已暂停', 'success');
+                loadWorkers();
+            } catch (e) {
+                showToast('暂停失败: ' + e.message, 'error');
+            }
+        }
+
+        async function resumeWorker(workerId) {
+            try {
+                await apiPost(`/api/workers/${workerId}/resume`, {});
+                showToast('工作节点已恢复', 'success');
+                loadWorkers();
+            } catch (e) {
+                showToast('恢复失败: ' + e.message, 'error');
+            }
+        }
+
+        async function deleteWorker(workerId) {
+            if (!confirm('确定要删除该离线工作节点吗？')) return;
+            try {
+                await apiDelete(`/api/workers/${workerId}`);
+                showToast('工作节点已删除', 'success');
+                loadWorkers();
+            } catch (e) {
+                showToast('删除失败: ' + e.message, 'error');
+            }
+        }
+
+        loadWorkers();
+        setInterval(loadWorkers, 3000);
+    </script>
+</body>
+</html>

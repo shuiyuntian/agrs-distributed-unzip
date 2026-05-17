@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>仪表盘 - 分布式解压系统</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+</head>
+<body>
+    <header>
+        <h1><span>分布式</span>解压系统</h1>
+        <nav id="main-nav"></nav>
+    </header>
+
+    <div class="container">
+        <div class="kpi-grid">
+            <div class="kpi-card total">
+                <div class="kpi-label">总批次</div>
+                <div class="kpi-value" id="dash-total">0</div>
+            </div>
+            <div class="kpi-card running">
+                <div class="kpi-label">运行中</div>
+                <div class="kpi-value" id="dash-running">0</div>
+            </div>
+            <div class="kpi-card success">
+                <div class="kpi-label">成功</div>
+                <div class="kpi-value" id="dash-success">0</div>
+            </div>
+            <div class="kpi-card failed">
+                <div class="kpi-label">失败 / 部分成功</div>
+                <div class="kpi-value" id="dash-failed">0</div>
+            </div>
+            <div class="kpi-card pending">
+                <div class="kpi-label">等待中</div>
+                <div class="kpi-value" id="dash-pending">0</div>
+            </div>
+        </div>
+
+        <div class="kpi-grid">
+            <div class="kpi-card" style="border-top:3px solid var(--primary)">
+                <div class="kpi-label">活跃工作节点</div>
+                <div class="kpi-value" id="dash-active-workers" style="color:var(--primary)">0</div>
+                <div style="font-size:0.75rem;color:var(--gray)">总计 <span id="dash-total-workers">0</span> | 忙碌 <span id="dash-busy-workers">0</span></div>
+            </div>
+            <div class="kpi-card" style="border-top:3px solid var(--success)">
+                <div class="kpi-label">吞吐量</div>
+                <div class="kpi-value" id="dash-throughput" style="color:var(--success)">0</div>
+                <div style="font-size:0.75rem;color:var(--gray)">MB/s</div>
+            </div>
+            <div class="kpi-card" style="border-top:3px solid var(--warning)">
+                <div class="kpi-label">平均速度</div>
+                <div class="kpi-value" id="dash-avg-speed" style="color:var(--warning)">0</div>
+                <div style="font-size:0.75rem;color:var(--gray)">MB/s / 任务</div>
+            </div>
+            <div class="kpi-card" style="border-top:3px solid var(--info)">
+                <div class="kpi-label">预计完成时间</div>
+                <div class="kpi-value" id="dash-eta" style="color:var(--info);font-size:1.5rem">--</div>
+                <div style="font-size:0.75rem;color:var(--gray)">剩余 <span id="dash-remaining">0</span> 批次</div>
+            </div>
+        </div>
+
+        <div class="charts-grid">
+            <div class="card">
+                <div class="card-title">吞吐量趋势 (MB/s)</div>
+                <div class="chart-container">
+                    <canvas id="chart-throughput"></canvas>
+                </div>
+            </div>
+            <div class="card">
+                <div class="card-title">批次状态分布</div>
+                <div class="chart-container">
+                    <canvas id="chart-status"></canvas>
+                </div>
+            </div>
+            <div class="card">
+                <div class="card-title">工作节点负载</div>
+                <div class="chart-container">
+                    <canvas id="chart-workers"></canvas>
+                </div>
+            </div>
+            <div class="card">
+                <div class="card-title">队列与运行趋势</div>
+                <div class="chart-container">
+                    <canvas id="chart-queue"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-title">工作节点</div>
+            <div style="overflow-x:auto">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>主机名</th>
+                            <th>IP</th>
+                            <th>状态</th>
+                            <th>活跃任务</th>
+                            <th>已完成</th>
+                            <th>最后心跳</th>
+                        </tr>
+                    </thead>
+                    <tbody id="worker-table-body">
+                        <tr><td colspan="7" style="text-align:center;color:var(--gray)">加载中...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <div class="toast-container" id="toast-container"></div>
+    <script src="/static/js/auth.js"></script>
+    <script>
+        if (!checkAuth()) {};
+        renderNav('/dashboard');
+    </script>
+    <script src="/static/js/dashboard.js"></script>
+</body>
+</html>

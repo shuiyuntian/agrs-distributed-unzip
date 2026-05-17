@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>用户管理 - 分布式解压系统</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <header>
+        <h1><span>分布式</span>解压系统</h1>
+        <nav id="main-nav"></nav>
+    </header>
+
+    <div class="container">
+        <div class="card">
+            <div class="card-title">创建新用户</div>
+            <div style="display:flex;gap:1rem;align-items:flex-end;flex-wrap:wrap">
+                <div class="form-group" style="flex:1;min-width:200px;margin-bottom:0">
+                    <label>用户名</label>
+                    <input type="text" id="new-username" placeholder="用户名">
+                </div>
+                <div class="form-group" style="flex:1;min-width:200px;margin-bottom:0">
+                    <label>密码</label>
+                    <input type="password" id="new-password" placeholder="密码">
+                </div>
+                <button class="btn btn-primary" onclick="createUser()">创建</button>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-title">用户列表</div>
+            <div class="toolbar">
+                <button class="btn btn-secondary btn-sm" onclick="loadUsers()">刷新</button>
+            </div>
+            <div style="overflow-x:auto">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>用户名</th>
+                            <th>创建时间</th>
+                            <th>操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="user-table-body">
+                        <tr><td colspan="4" style="text-align:center;color:var(--gray)">加载中...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <div class="toast-container" id="toast-container"></div>
+    <script src="/static/js/auth.js"></script>
+    <script>
+        if (!checkAuth()) {};
+        renderNav('/users');
+
+        async function loadUsers() {
+            try {
+                const data = await apiGet('/api/users/list');
+                const tbody = document.getElementById('user-table-body');
+                if (data.users.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:var(--gray)">暂无用户</td></tr>';
+                    return;
+                }
+                tbody.innerHTML = data.users.map(u => `
+                    <tr>
+                        <td>${u.id}</td>
+                        <td>${u.username}</td>
+                        <td>${new Date(u.created_at.replace(' ', 'T') + 'Z').toLocaleString('zh-CN', {timeZone: 'Asia/Shanghai'})}</td>
+                        <td>
+                            <button class="btn btn-sm btn-danger" onclick="deleteUser(${u.id}, '${u.username}')">删除</button>
+                        </td>
+                    </tr>
+                `).join('');
+            } catch (e) {
+                document.getElementById('user-table-body').innerHTML = `<tr><td colspan="4" style="text-align:center;color:var(--danger)">加载失败</td></tr>`;
+            }
+        }
+
+        async function createUser() {
+            const username = document.getElementById('new-username').value.trim();
+            const password = document.getElementById('new-password').value;
+            if (!username || !password) {
+                showToast('请输入用户名和密码', 'error');
+                return;
+            }
+            try {
+                await apiPost('/api/users/create', { username, password });
+                showToast('用户已创建', 'success');
+                document.getElementById('new-username').value = '';
+                document.getElementById('new-password').value = '';
+                loadUsers();
+            } catch (e) {
+                showToast('创建失败: ' + e.message, 'error');
+            }
+        }
+
+        async function deleteUser(userId, username) {
+            if (!confirm(`删除用户 "${username}"？`)) return;
+            try {
+                await apiDelete(`/api/users/${userId}`);
+                showToast('用户已删除', 'success');
+                loadUsers();
+            } catch (e) {
+                showToast('删除失败: ' + e.message, 'error');
+            }
+        }
+
+        loadUsers();
+    </script>
+</body>
+</html>

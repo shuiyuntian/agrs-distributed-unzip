@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>批次详情 - 分布式解压系统</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <style>
+        .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 0.75rem; margin-bottom: 1rem; }
+        .stat-card { background: var(--bg); padding: 0.75rem; border-radius: 0.5rem; text-align: center; }
+        .stat-value { font-size: 1.5rem; font-weight: 700; }
+        .stat-label { font-size: 0.75rem; color: var(--gray); }
+        .filter-bar { display: flex; gap: 0.5rem; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; }
+        .pagination { display: flex; gap: 0.5rem; align-items: center; justify-content: center; margin-top: 1rem; }
+        .page-btn { padding: 0.25rem 0.75rem; border: 1px solid var(--border); background: var(--card-bg); border-radius: 0.25rem; cursor: pointer; }
+        .page-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .page-btn.active { background: var(--primary); color: white; border-color: var(--primary); }
+        .back-link { color: var(--primary); text-decoration: none; font-size: 0.875rem; }
+        .back-link:hover { text-decoration: underline; }
+        .progress-bar { width: 100%; height: 8px; background: var(--border); border-radius: 4px; overflow: hidden; margin-top: 0.5rem; }
+        .progress-fill { height: 100%; background: var(--primary); transition: width 0.3s; }
+    </style>
+</head>
+<body>
+    <header>
+        <h1><span>分布式</span>解压系统</h1>
+        <nav id="main-nav"></nav>
+    </header>
+
+    <div class="container">
+        <a href="/tasks" class="back-link">&larr; 返回批次列表</a>
+
+        <!-- 批次基本信息 -->
+        <div class="card" style="margin-top:1rem">
+            <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:0.5rem">
+                <span id="batch-title">批次详情</span>
+                <div id="batch-actions" style="display:flex;gap:0.5rem;flex-wrap:wrap"></div>
+            </div>
+            <div id="batch-info" style="font-size:0.9rem;color:var(--text);line-height:1.8">
+                加载中...
+            </div>
+            <div id="batch-progress"></div>
+        </div>
+
+        <!-- 统计卡片 -->
+        <div class="stat-grid" id="stat-grid">
+            <div class="stat-card">
+                <div class="stat-value" id="stat-total">0</div>
+                <div class="stat-label">总任务</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="stat-success" style="color:var(--success)">0</div>
+                <div class="stat-label">成功</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="stat-failed" style="color:var(--danger)">0</div>
+                <div class="stat-label">失败</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="stat-running" style="color:var(--primary)">0</div>
+                <div class="stat-label">运行中</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="stat-pending" style="color:var(--warning)">0</div>
+                <div class="stat-label">等待中</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="stat-retrying" style="color:var(--gray)">0</div>
+                <div class="stat-label">待重试</div>
+            </div>
+        </div>
+
+        <!-- 任务列表 -->
+        <div class="card">
+            <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:0.5rem">
+                <span>子任务清单</span>
+                <div class="filter-bar">
+                    <label style="font-size:0.8rem;color:var(--gray)">状态筛选:</label>
+                    <select id="status-filter" onchange="onFilterChange()">
+                        <option value="">全部</option>
+                        <option value="pending">等待中</option>
+                        <option value="running">运行中</option>
+                        <option value="success">成功</option>
+                        <option value="failed">失败</option>
+                        <option value="retrying">待重试</option>
+                        <option value="paused">已暂停</option>
+                        <option value="cancelled">已取消</option>
+                    </select>
+                    <span style="font-size:0.8rem;color:var(--gray)" id="task-count-info"></span>
+                </div>
+            </div>
+            <div style="overflow-x:auto">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>压缩包</th>
+                            <th>类型</th>
+                            <th>状态</th>
+                            <th>提交时间</th>
+                            <th>开始时间</th>
+                            <th>完成时间</th>
+                            <th>耗时</th>
+                            <th>工作节点</th>
+                            <th>重试</th>
+                            <th>错误信息</th>
+                        </tr>
+                    </thead>
+                    <tbody id="task-table-body">
+                        <tr><td colspan="11" style="text-align:center;color:var(--gray)">加载中...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+            <div class="pagination" id="pagination"></div>
+        </div>
+    </div>
+
+    <div class="toast-container" id="toast-container"></div>
+    <script src="/static/js/auth.js"></script>
+    <script>
+        if (!checkAuth()) {};
+        renderNav('/tasks');
+
+        const PAGE_SIZE = 50;
+        let currentPage = 0;
+        let currentFilter = '';
+        let batchId = null;
+        let batchStatus = '';
+
+        function getStatusBadge(status) {
+            const map = {
+                'pending': ['等待中', 'status-pending'],
+                'running': ['运行中', 'status-running'],
+                'success': ['成功', 'status-success'],
+                'failed': ['失败', 'status-failed'],
+                'partial': ['部分成功', 'status-partial'],
+                'paused': ['已暂停', 'status-warning'],
+                'cancelled': ['已取消', 'status-cancelled'],
+                'retrying': ['待重试', 'status-retrying']
+            };
+            const [label, cls] = map[status] || [status, ''];
+            return `<span class="status-badge ${cls}">${label}</span>`;
+        }
+
+        function formatTime(dt) {
+            if (!dt) return '-';
+            return new Date(dt.replace(' ', 'T') + 'Z').toLocaleString('zh-CN', {timeZone: 'Asia/Shanghai'});
+        }
+
+        function formatDuration(seconds) {
+            if (!seconds || seconds <= 0) return '-';
+            const h = Math.floor(seconds / 3600);
+            const m = Math.floor((seconds % 3600) / 60);
+            const s = Math.floor(seconds % 60);
+            if (h > 0) return `${h}小时 ${m}分 ${s}秒`;
+            if (m > 0) return `${m}分 ${s}秒`;
+            return `${s}秒`;
+        }
+
+        function getBatchIdFromUrl() {
+            const params = new URLSearchParams(window.location.search);
+            return params.get('id');
+        }
+
+        async function loadBatchInfo() {
+            try {
+                const detail = await apiGet(`/api/tasks/batches/${batchId}`);
+                const b = detail.batch;
+                batchStatus = b.status;
+                const folderName = b.input_path.split(/[\\/]/).pop() || b.input_path;
+                let duration = '-';
+                if (b.started_at && b.completed_at) {
+                    duration = formatDuration((new Date(b.completed_at.replace(' ', 'T') + 'Z').getTime() - new Date(b.started_at.replace(' ', 'T') + 'Z').getTime()) / 1000);
+                } else if (b.started_at) {
+                    duration = formatDuration((new Date().getTime() - new Date(b.started_at.replace(' ', 'T') + 'Z').getTime()) / 1000) + ' (进行中)';
+                }
+
+                document.getElementById('batch-title').textContent = `批次 #${b.id} — ${folderName}`;
+                document.getElementById('batch-info').innerHTML = `
+                    <strong>输入路径:</strong> ${b.input_path}<br>
+                    <strong>输出路径:</strong> ${b.output_root || '-'}<br>
+                    <strong>状态:</strong> ${getStatusBadge(b.status)}<br>
+                    <strong>提交时间:</strong> ${formatTime(b.created_at)}<br>
+                    <strong>开始时间:</strong> ${formatTime(b.started_at)}<br>
+                    <strong>完成时间:</strong> ${formatTime(b.completed_at)}<br>
+                    <strong>耗时:</strong> ${duration}
+                `;
+
+                // 操作按钮
+                let actions = '';
+                if (b.status === 'running' || b.status === 'pending') {
+                    actions += `<button class="btn btn-sm btn-warning" onclick="pauseBatch()">暂停</button>`;
+                    actions += `<button class="btn btn-sm btn-danger" onclick="cancelBatch()">取消</button>`;
+                }
+                if (b.status === 'paused') {
+                    actions += `<button class="btn btn-sm btn-success" onclick="resumeBatch()">恢复</button>`;
+                    actions += `<button class="btn btn-sm btn-danger" onclick="cancelBatch()">取消</button>`;
+                }
+                if (b.status === 'failed' || b.status === 'partial') {
+                    actions += `<button class="btn btn-sm btn-warning" onclick="retryBatch()">重试</button>`;
+                }
+                actions += `<button class="btn btn-sm btn-danger" onclick="deleteBatch()">删除</button>`;
+                document.getElementById('batch-actions').innerHTML = actions;
+
+                // 进度条
+                const total = b.total_subtasks || 0;
+                const completed = b.completed_subtasks || 0;
+                const failed = b.failed_subtasks || 0;
+                const pct = total > 0 ? Math.min(100, ((completed + failed) / total * 100)).toFixed(1) : 0;
+                let color = 'var(--primary)';
+                if (b.status === 'success') color = 'var(--success)';
+                else if (b.status === 'failed' || b.status === 'partial' || b.status === 'cancelled') color = 'var(--danger)';
+                document.getElementById('batch-progress').innerHTML = `
+                    <div style="font-size:0.8rem;color:var(--gray);margin-bottom:0.25rem">
+                        ${completed} 已完成 / ${failed} 失败 / ${total} 总计 (${pct}%)
+                    </div>
+                    <div class="progress-bar"><div class="progress-fill" style="width:${pct}%;background:${color}"></div></div>
+                `;
+            } catch (e) {
+                document.getElementById('batch-info').innerHTML = '<span style="color:var(--danger)">加载失败</span>';
+            }
+        }
+
+        async function loadStats() {
+            try {
+                const data = await apiGet(`/api/tasks/batches/${batchId}/stats`);
+                const c = data.counts;
+                document.getElementById('stat-total').textContent = c.total;
+                document.getElementById('stat-success').textContent = c.success;
+                document.getElementById('stat-failed').textContent = c.failed;
+                document.getElementById('stat-running').textContent = c.running;
+                document.getElementById('stat-pending').textContent = c.pending + c.retrying;
+                document.getElementById('stat-retrying').textContent = c.retrying;
+                return c.total;
+            } catch (e) {
+                return 0;
+            }
+        }
+
+        async function loadTasks() {
+            const tbody = document.getElementById('task-table-body');
+            tbody.innerHTML = '<tr><td colspan="11" style="text-align:center;color:var(--gray)">加载中...</td></tr>';
+            try {
+                const data = await apiGet(`/api/tasks/batches/${batchId}/all-tasks?offset=${currentPage * PAGE_SIZE}&limit=${PAGE_SIZE}&status=${currentFilter}`);
+                const tasks = data.tasks;
+                const total = data.total;
+
+                const totalPages = Math.ceil(total / PAGE_SIZE) || 1;
+                document.getElementById('task-count-info').textContent = `共 ${total} 条, 第 ${currentPage + 1}/${totalPages} 页`;
+
+                if (tasks.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="11" style="text-align:center;color:var(--gray)">暂无任务</td></tr>';
+                } else {
+                    tbody.innerHTML = tasks.map(t => {
+                        let dur = '-';
+                        if (t.started_at && t.completed_at) {
+                            dur = formatDuration((new Date(t.completed_at.replace(' ', 'T') + 'Z').getTime() - new Date(t.started_at.replace(' ', 'T') + 'Z').getTime()) / 1000);
+                        } else if (t.started_at) {
+                            dur = formatDuration((new Date().getTime() - new Date(t.started_at.replace(' ', 'T') + 'Z').getTime()) / 1000) + ' (进行中)';
+                        }
+                        const archiveName = t.input_path ? t.input_path.split(/[\\/]/).pop() : '-';
+                        return `
+                            <tr>
+                                <td>${t.id}</td>
+                                <td title="${t.input_path || ''}">${archiveName}</td>
+                                <td>${t.archive_type || '-'}</td>
+                                <td>${getStatusBadge(t.status)}</td>
+                                <td>${formatTime(t.created_at)}</td>
+                                <td>${formatTime(t.started_at)}</td>
+                                <td>${formatTime(t.completed_at)}</td>
+                                <td>${dur}</td>
+                                <td title="${t.worker_id || ''}">${t.worker_id ? t.worker_id.substring(0, 8) + '...' : '-'}</td>
+                                <td>${t.retry_count}</td>
+                                <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${t.error_message || ''}">${t.error_message || '-'}</td>
+                            </tr>
+                        `;
+                    }).join('');
+                }
+
+                renderPagination(total);
+            } catch (e) {
+                tbody.innerHTML = `<tr><td colspan="11" style="text-align:center;color:var(--danger)">加载失败</td></tr>`;
+            }
+        }
+
+        function renderPagination(total) {
+            const totalPages = Math.ceil(total / PAGE_SIZE) || 1;
+            let html = '';
+            html += `<button class="page-btn" onclick="goPage(${currentPage - 1})" ${currentPage === 0 ? 'disabled' : ''}>上一页</button>`;
+            for (let i = 0; i < totalPages; i++) {
+                if (i === currentPage) {
+                    html += `<button class="page-btn active">${i + 1}</button>`;
+                } else if (i === 0 || i === totalPages - 1 || (i >= currentPage - 2 && i <= currentPage + 2)) {
+                    html += `<button class="page-btn" onclick="goPage(${i})">${i + 1}</button>`;
+                } else if (i === currentPage - 3 || i === currentPage + 3) {
+                    html += `<span style="color:var(--gray)">...</span>`;
+                }
+            }
+            html += `<button class="page-btn" onclick="goPage(${currentPage + 1})" ${currentPage >= totalPages - 1 ? 'disabled' : ''}>下一页</button>`;
+            document.getElementById('pagination').innerHTML = html;
+        }
+
+        function goPage(page) {
+            const totalPages = Math.ceil(parseInt(document.getElementById('stat-total').textContent) / PAGE_SIZE) || 1;
+            if (page < 0 || page >= totalPages) return;
+            currentPage = page;
+            loadTasks();
+        }
+
+        function onFilterChange() {
+            currentFilter = document.getElementById('status-filter').value;
+            currentPage = 0;
+            loadTasks();
+        }
+
+        async function pauseBatch() {
+            try { await apiPost(`/api/tasks/batches/${batchId}/pause`, {}); showToast('批次已暂停', 'success'); loadBatchInfo(); loadStats(); loadTasks(); }
+            catch (e) { showToast('暂停失败: ' + e.message, 'error'); }
+        }
+        async function resumeBatch() {
+            try { await apiPost(`/api/tasks/batches/${batchId}/resume`, {}); showToast('批次已恢复', 'success'); loadBatchInfo(); loadStats(); loadTasks(); }
+            catch (e) { showToast('恢复失败: ' + e.message, 'error'); }
+        }
+        async function cancelBatch() {
+            if (!confirm(`取消批次 #${batchId}？`)) return;
+            try { await apiPost(`/api/tasks/batches/${batchId}/cancel`, {}); showToast('批次已取消', 'success'); loadBatchInfo(); loadStats(); loadTasks(); }
+            catch (e) { showToast('取消失败: ' + e.message, 'error'); }
+        }
+        async function retryBatch() {
+            try { await apiPost(`/api/tasks/batches/${batchId}/retry`, {}); showToast('已触发批次重试', 'success'); loadBatchInfo(); loadStats(); loadTasks(); }
+            catch (e) { showToast('重试失败: ' + e.message, 'error'); }
+        }
+        async function deleteBatch() {
+            if (!confirm(`删除批次 #${batchId} 及其所有子任务？`)) return;
+            try { await apiDelete(`/api/tasks/batches/${batchId}`); showToast('批次已删除', 'success'); window.location.href = '/tasks'; }
+            catch (e) { showToast('删除失败: ' + e.message, 'error'); }
+        }
+
+        async function init() {
+            batchId = getBatchIdFromUrl();
+            if (!batchId) {
+                document.body.innerHTML = '<div class="container"><div style="color:var(--danger);padding:2rem">缺少批次 ID 参数</div></div>';
+                return;
+            }
+            batchId = parseInt(batchId);
+            await loadBatchInfo();
+            await loadStats();
+            await loadTasks();
+        }
+
+        init();
+        setInterval(() => { loadBatchInfo(); loadStats(); loadTasks(); }, 3000);
+    </script>
+</body>
+</html>
