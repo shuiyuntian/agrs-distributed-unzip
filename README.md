@@ -55,7 +55,7 @@
 在 Web UI 的"提交任务"页面，输入压缩包所在文件夹的 UNC 路径：
 
 ```
-\\192.168.1.10\home\Drive\WorkSpace\06LAB\ray_unzip\data\tar_gz
+\\192.168.1.10\...\tar_gz
 ```
 
 系统会自动递归扫描该目录下的所有 `.zip` / `.tar.gz` / `.tar` / `.gz` 文件，并为每个压缩包创建子任务。
